@@ -8,6 +8,11 @@ from PIL import Image
 pickle_in = open('classifier.pkl', 'rb')
 classifier = pickle.load(pickle_in)
 
+
+pickle.dump(classifier.pkl, open(classifier.pkl, 'wb'))
+model = pickle.load(open(classifier.pkl, 'rb'))
+print("model loaded")
+
 def welcome():
 	return 'welcome all'
 
