@@ -5,12 +5,12 @@ import streamlit as st
 from PIL import Image
 
 # loading in the model to predict on the data
-pickle_in = open('classifier.pkl', 'rb')
-classifier = pickle.load(pickle_in)
+#pickle_in = open('classifier.pkl', 'rb')
+#classifier = pickle.load(pickle_in)
 
 
-pickle.dump(classifier.pkl, open(classifier.pkl, 'wb'))
-model = pickle.load(open(classifier.pkl, 'rb'))
+pickle.dump('classifier.pkl', open('classifier.pkl', 'wb'))
+model = pickle.load(open('classifier.pkl', 'rb'))
 print("model loaded")
 
 def welcome():
