@@ -1,92 +1,92 @@
-import pandas as pd
-import numpy as np
-
-
-import streamlit as st
-
-import pandas as pd
-import numpy as np
-import spacy
-from spacy.lang.en.stop_words import STOP_WORDS as stopwords
-from bs4 import BeautifulSoup
-import unicodedata
-import en_core_web_sm
-
-from sklearn.feature_extraction.text import CountVectorizer
-
+import datetime as dt
 import re
-import os
-import sys
-import json
-
-def removeEmails(x):
-    return re.sub(r'([a-z0-9+._-]+@[a-z0-9+._-]+\.[a-z0-9+_-]+)',"", x)
-
-def removeUrls(x):
-    return re.sub(r'(http|https|ftp|ssh)://([\w_-]+(?:(?:\.[\w_-]+)+))([\w.,@?^=%&:/~+#-]*[\w@?^=%&/~+#-])?', '' , x)
-
-def removeRt(x):
-    return re.sub(r'\brt\b', '', x).strip()
-
-def removeSpecialChars(x):
-    x = re.sub(r'[^\w ]+', "", x)
-    x = ' '.join(x.split())
-    return x
-
-def removeAccentedChars(x):
-    x = unicodedata.normalize('NFKD', x).encode('ascii', 'ignore').decode('utf-8', 'ignore')
-    return x
-
-def removeStopwords(x):
-    return ' '.join([t for t in x.split() if t not in stopwords])	
-
-def removeDupsChar(x):
-    x = re.sub("(.)\\1{2,}", "\\1", x)
-    return x
-
-def removeHTMLtags(x):
-    return BeautifulSoup(x, 'html.parser').get_text().strip()
-
-def dataClean(x):
-    x = str(x).lower().replace('\\', '').replace('_', ' ')
-    x = removeHTMLtags(x)
-    x = removeStopwords(x)
-    x = removeEmails(x)
-    x = removeUrls(x)
-    x = removeRt(x)
-    x = removeDupsChar(x)
-    x = removeAccentedChars(x)
-    x = removeSpecialChars(x)
-    x = re.sub("(.)\\1{2,}", "\\1", x)
-    return x
-
-st.title("IDENTIFICATION OF TWEETS RELATED TO DISASTER AND THOSE NOT RELATED TO DISASTER")
-
-st.write("You can enter your tweet below and the model trained on labeled tweet data provided by Kaggle can predict with above 80% accuracy whether the tweet is related to disaster or not")
-
-tweet = st.text_input(label="Enter the tweet you want to identify below:",value="", max_chars=None,placeholder="Enter your tweet here")
-
-
-def tweet_classifier(text):
-    tweet= text.apply(lambda x: dataClean(x))
-
-import spacy
-import en_core_web_lg
-nlp = en_core_web_lg.load()
-
-def get_vec(x):
-    doc = nlp(x)
-    vec = doc.vector
-    return vec
-
-tweet=tweet.apply(lambda x: get_vec(x))
-
-
+import pandas as pd
+import streamlit as st
+from flair.data import Sentence
+from flair.models import TextClassifier
+from twitterscraper import query_tweets
 import pickle
-pickled_model = pickle.load(open('cnnmodel.pkl', 'rb'))
-pickled_model.predict(tweet)
+# Set page title
+st.title('Twitter Sentiment Analysis')
 
+# Load classification model
+with st.spinner('Loading classification model...'):
+    #classifier = TextClassifier.load('models/best-model.pt')
+    pickled_model = pickle.load(open('cnnmodel.pkl', 'rb'))
+    
 
-if st.button("Predict"):
-       tweet_classifier(tweet)
+# Preprocess function
+allowed_chars = ' AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZz0123456789~`!@#$%^&*()-=_+[]{}|;:",./<>?'
+punct = '!?,.@#'
+maxlen = 280
 
+def preprocess(text):
+    # Delete URLs, cut to maxlen, space out punction with spaces, and remove unallowed chars
+    return ''.join([' ' + char + ' ' if char in punct else char for char in [char for char in re.sub(r'http\S+', 'http', text, flags=re.MULTILINE) if char in allowed_chars]])
+
+### SINGLE TWEET CLASSIFICATION ###
+st.subheader('Single tweet classification')
+
+# Get sentence input, preprocess it, and convert to flair.data.Sentence format
+tweet_input = st.text_input('Tweet:')
+
+if tweet_input != '':
+    # Pre-process tweet
+    sentence = Sentence(preprocess(tweet_input))
+
+    # Make predictions
+    with st.spinner('Predicting...'):
+        pickled_model.predict(sentence)
+
+    # Show predictions
+    label_dict = {'0': 'Negative', '4': 'Positive'}
+
+    if len(sentence.labels) > 0:
+        st.write('Prediction:')
+        st.write(label_dict[sentence.labels[0].value] + ' with ',
+                sentence.labels[0].score*100, '% confidence')
+
+### TWEET SEARCH AND CLASSIFY ###
+st.subheader('Search Twitter for Query')
+
+# Get user input
+query = st.text_input('Query:', '#')
+
+# As long as the query is valid (not empty or equal to '#')...
+if query != '' and query != '#':
+    with st.spinner(f'Searching for and analyzing {query}...'):
+        # Get English tweets from the past 4 weeks
+        tweets = query_tweets(query, begindate=dt.date.today() - dt.timedelta(weeks=4), lang='en')
+
+        # Initialize empty dataframe
+        tweet_data = pd.DataFrame({
+            'tweet': [],
+            'predicted-sentiment': []
+        })
+
+        # Keep track of positive vs. negative tweets
+        pos_vs_neg = {'0': 0, '4': 0}
+
+        # Add data for each tweet
+        for tweet in tweets:
+            # Skip iteration if tweet is empty
+            if tweet.text in ('', ' '):
+                continue
+            # Make predictions
+            sentence = Sentence(preprocess(tweet.text))
+            pickled_model.predict(tweet)
+            sentiment = sentence.labels[0]
+            # Keep track of positive vs. negative tweets
+            pos_vs_neg[sentiment.value] += 1
+            # Append new data
+            tweet_data = tweet_data.append({'tweet': tweet.text, 'predicted-sentiment': sentiment}, ignore_index=True)
+
+# Show query data and sentiment if available
+try:
+    st.write(tweet_data)
+    try:
+        st.write('Positive to negative tweet ratio:', pos_vs_neg['4']/pos_vs_neg['0'])
+    except ZeroDivisionError: # if no negative tweets
+        st.write('All postive tweets')
+except NameError: # if no queries have been made yet
+    pass
